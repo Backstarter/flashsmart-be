@@ -35,11 +35,12 @@ class Flashcard:
     BACK_IMAGE_TEXT_LIMIT = 100
 
     def __init__(self, title=None, front=None, back=None, front_image_url=None, back_image_url=None):
+        self.update_front_image_url(front_image_url)
+        self.update_back_image_url(back_image_url)
         self.update_title(title)
         self.update_front(front)
         self.update_back(back)
-        self.update_front_image_url(front_image_url)
-        self.update_back_image_url(back_image_url)
+
 
     def update_title(self, title):
         self.title = title[:Flashcard.TITLE_LENGTH_LIMIT]
@@ -112,9 +113,9 @@ def hello():
 
 def generate_flashcards(n, topic=None, reference=None):
     if topic:
-        prompt = f"Generate {n} flashcards on the topic of {topic} with the following information: \n"
+        prompt = f"Generate {n} flashcards on the topic of {topic}. Make sure the title is <=50 chars and the front and back are <=200 chars long. \n"
     elif reference:
-        prompt = f"Generate {n} additional flashcards based on the following reference: \n{reference}\n"
+        prompt = f"Generate {n} additional flashcards based on the following reference: \n{reference}\nMake sure the title is <=50 chars and the front and back are <=200 chars long."
 
     completion = client.beta.chat.completions.parse(
         model="gpt-4o-mini",
@@ -130,5 +131,6 @@ def generate_flashcards(n, topic=None, reference=None):
 
 flashcards = generate_flashcards(5, topic="Python programming")
 for flashcard in flashcards:
+    flashcard = Flashcard.from_dict(flashcard.model_dump())
     print(flashcard)
     print()
