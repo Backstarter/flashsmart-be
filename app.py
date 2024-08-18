@@ -34,13 +34,13 @@ class Flashcard:
     FRONT_IMAGE_TEXT_LIMIT = 100
     BACK_IMAGE_TEXT_LIMIT = 100
 
-    def __init__(self, title=None, front=None, back=None, front_image_url=None, back_image_url=None):
+    def __init__(self, id=None, title=None, front=None, back=None, front_image_url=None, back_image_url=None):
+        self.id = id
         self.update_front_image_url(front_image_url)
         self.update_back_image_url(back_image_url)
         self.update_title(title)
         self.update_front(front)
         self.update_back(back)
-
 
     def update_title(self, title):
         self.title = title[:Flashcard.TITLE_LENGTH_LIMIT]
@@ -75,6 +75,7 @@ class Flashcard:
     @staticmethod
     def from_dict(data):
         return Flashcard(
+            id=data.get("id"),
             title=data.get("title"),
             front=data.get("front"),
             back=data.get("back"),
@@ -91,10 +92,11 @@ class Flashcard:
         return Flashcard(**data)
 
     def __str__(self):
-        return f"Flashcard\nTitle: {self.title}\nFront: {self.front}\nBack: {self.back}\nFront Image: {self.front_image_url}\nBack Image:{self.back_image_url}"
+        return f"Flashcard\nID: {self.id}\nTitle: {self.title}\nFront: {self.front}\nBack: {self.back}\nFront Image: {self.front_image_url}\nBack Image:{self.back_image_url}"
 
 
 class FlashcardSchema(BaseModel):
+    id: int
     title: str
     front: str
     back: str
@@ -111,6 +113,83 @@ def hello():
     return jsonify({'hello': 'world'}), 200
 
 
+# ========= FIREBASE =========
+def add_user(name):
+    def increment_counter(current_value):
+        if current_value is None:
+            return 1
+        else:
+            return current_value + 1
+
+    counter_ref = db.reference('user_counter')
+    new_user_id = counter_ref.transaction(increment_counter)
+    name = name[:30]
+
+    user_ref = db.reference(f'users/{new_user_id}')
+    user_ref.set({
+        'name': name,
+        'flashcards': {},
+        'card_counter': 0
+    })
+    print(f"New user {name} added with ID {new_user_id}. User initialized with empty flashcard collection and a card counter set to 0.")
+    return new_user_id
+
+
+def delete_user(user_id):
+    user_ref = db.reference(f'users/{user_id}')
+    user_data = user_ref.get()
+    if user_data:
+        user_ref.delete()
+        print(f"User {user_id} and all associated flashcards have been deleted.")
+        return user_id
+    else:
+        print(f"User {user_id} does not exist.")
+
+
+def add_flashcard(user_id, flashcard_json):
+    flashcard = Flashcard.from_json(flashcard_json)
+
+    user_ref = db.reference(f'users/{user_id}')
+    user_data = user_ref.get()
+    if user_data:
+        card_counter = user_data.get('card_counter', 0)
+        flashcard.id = card_counter
+        flashcards_ref = user_ref.child('flashcards')
+        flashcards_ref.update({
+            card_counter: flashcard.to_dict()
+        })
+        user_ref.update({'card_counter': card_counter + 1})
+        print(f"Added new flashcard with ID {card_counter} to user {user_id}.")
+        return card_counter
+    else:
+        print(f"User {user_id} does not exist.")
+
+
+def edit_flashcard(user_id, flashcard_id, flashcard_json):
+    flashcard_ref = db.reference(f'users/{user_id}/flashcards/{flashcard_id}')
+    flashcard_data = flashcard_ref.get()
+    if flashcard_data:
+        updated_flashcard = Flashcard.from_json(flashcard_json)
+        updated_flashcard.id = flashcard_id
+        flashcard_ref.set(updated_flashcard.to_dict())
+        print(f"Flashcard ID {flashcard_id} for user {user_id} has been updated.")
+        return flashcard_id
+    else:
+        print(f"Flashcard ID {flashcard_id} for user {user_id} does not exist or has already been deleted.")
+
+
+def delete_flashcard(user_id, flashcard_id):
+    flashcard_ref = db.reference(f'users/{user_id}/flashcards/{flashcard_id}')
+    flashcard_data = flashcard_ref.get()
+    if flashcard_data:
+        flashcard_ref.delete()
+        print(f"Flashcard ID {flashcard_id} for user {user_id} has been deleted.")
+        return flashcard_id
+    else:
+        print(f"Flashcard ID {flashcard_id} for user {user_id} does not exist or has already been deleted.")
+
+
+# ========= GEN AI =========
 def generate_flashcards(n, topic=None, reference=None):
     if topic:
         prompt = f"Generate {n} flashcards on the topic of {topic}. Make sure the title is <=50 chars and the front and back are <=200 chars long. \n"
@@ -129,8 +208,26 @@ def generate_flashcards(n, topic=None, reference=None):
     return flashcards.flashcards
 
 
-flashcards = generate_flashcards(5, topic="Python programming")
+# test generate flashcards
+flashcards = generate_flashcards(2, topic="Python programming")
+flashcards = [Flashcard.from_dict(flashcard.model_dump()) for flashcard in flashcards]
 for flashcard in flashcards:
-    flashcard = Flashcard.from_dict(flashcard.model_dump())
     print(flashcard)
-    print()
+
+# test adding user
+new_user_id = add_user("Alice")
+
+# test adding flashcard
+new_flashcard_id = add_flashcard(new_user_id, flashcards[0].to_json())
+
+# test editing flashcard
+edit_flashcard(new_user_id, new_flashcard_id, flashcards[1].to_json())
+
+# test deleting flashcard
+delete_flashcard(new_user_id, new_flashcard_id)
+
+# test deleting user
+delete_user(new_user_id)
+
+
+
