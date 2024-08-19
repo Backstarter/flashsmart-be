@@ -12,16 +12,15 @@ from clerk_backend_api import Clerk
 from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
 from prompt_templates import *
 
+load_dotenv()
 app = Flask(__name__)
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY")
 jwt = JWTManager(app)
 CORS(app)
 
-load_dotenv()
-
 # clerk
-bearer_auth = os.getenv("CLERK_BEARER_TOKEN")
-clerk = Clerk(bearer_auth=bearer_auth)
+# bearer_auth = os.getenv("CLERK_BEARER_TOKEN")
+# clerk = Clerk(bearer_auth=bearer_auth)
 
 # openai
 openai_api_key = os.getenv("OPENAI_API_KEY")
