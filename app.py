@@ -8,11 +8,20 @@ import json
 from dotenv import load_dotenv
 import openai
 from pydantic import BaseModel
+from clerk_backend_api import Clerk
+from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
+from prompt_templates import *
 
 app = Flask(__name__)
+app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY")
+jwt = JWTManager(app)
 CORS(app)
 
 load_dotenv()
+
+# clerk
+bearer_auth = os.getenv("CLERK_BEARER_TOKEN")
+clerk = Clerk(bearer_auth=bearer_auth)
 
 # openai
 openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -34,7 +43,8 @@ class Flashcard:
     FRONT_IMAGE_TEXT_LIMIT = 100
     BACK_IMAGE_TEXT_LIMIT = 100
 
-    def __init__(self, id=None, title=None, front=None, back=None, front_image_url=None, back_image_url=None):
+    def __init__(self, id=None, title=None, front=None, back=None,
+                 front_image_url=None, back_image_url=None):
         self.id = id
         self.update_front_image_url(front_image_url)
         self.update_back_image_url(back_image_url)
@@ -108,31 +118,132 @@ class FlashcardCollection(BaseModel):
     flashcards: list[FlashcardSchema]
 
 
+# ========= ENDPOINTS =========
 @app.route('/hello', methods=['POST'])
 def hello():
     return jsonify({'hello': 'world'}), 200
 
 
+@app.route('/add-user', methods=['POST'])
+@jwt_required()
+def add_user_endpoint():
+    clerk_user_id = get_jwt_identity()
+    data = request.json
+    name = data.get('name')
+    new_user_id = add_user(clerk_user_id, name)
+    return jsonify({'user_id': new_user_id}), 200
+
+
+@app.route('/delete-user', methods=['POST'])
+@jwt_required()
+def delete_user_endpoint():
+    clerk_user_id = get_jwt_identity()
+    deleted_user_id = delete_user(clerk_user_id)
+    return jsonify({'user_id': deleted_user_id}), 200
+
+
+@app.route('/create-deck', methods=['POST'])
+@jwt_required()
+def create_deck_endpoint():
+    data = request.json
+    deck_name = data.get('deck_name')
+    new_deck_id = create_deck(deck_name)
+    return jsonify({'deck_id': new_deck_id}), 200
+
+
+@app.route('/add-deck-to-user', methods=['POST'])
+@jwt_required()
+def add_deck_to_user_endpoint():
+    clerk_user_id = get_jwt_identity()
+    data = request.json
+    deck_id = data.get('deck_id')
+    added_deck_id = add_deck_to_user(clerk_user_id, deck_id)
+    return jsonify({'deck_id': added_deck_id}), 200
+
+
+@app.route('/remove-deck-from-user', methods=['POST'])
+@jwt_required()
+def remove_deck_from_user_endpoint():
+    clerk_user_id = get_jwt_identity()
+    data = request.json
+    deck_id = data.get('deck_id')
+    removed_deck_id = remove_deck_from_user(clerk_user_id, deck_id)
+    return jsonify({'deck_id': removed_deck_id}), 200
+
+
+@app.route('/get-decks', methods=['GET'])
+@jwt_required()
+def get_decks_endpoint():
+    clerk_user_id = get_jwt_identity()
+    decks = get_decks(clerk_user_id)
+    return jsonify({'decks': decks}), 200
+
+
+@app.route('/add-flashcard', methods=['POST'])
+@jwt_required()
+def add_flashcard_endpoint():
+    data = request.json
+    clerk_user_id = get_jwt_identity()
+    deck_id = data.get('deck_id')
+    if not verify_user_has_deck(clerk_user_id, deck_id):
+        return jsonify(
+            {'error': 'User does not have access to this deck.'}), 403
+    flashcard_json = data.get('flashcard')
+    new_flashcard_id = add_flashcard(deck_id, flashcard_json)
+    return jsonify({'flashcard_id': new_flashcard_id}), 200
+
+
+@app.route('/edit-flashcard', methods=['POST'])
+@jwt_required()
+def edit_flashcard_endpoint():
+    data = request.json
+    clerk_user_id = get_jwt_identity()
+    deck_id = data.get('deck_id')
+    if not verify_user_has_deck(clerk_user_id, deck_id):
+        return jsonify(
+            {'error': 'User does not have access to this deck.'}), 403
+    flashcard_id = data.get('flashcard_id')
+    flashcard_json = data.get('flashcard')
+    edited_flashcard_id = edit_flashcard(deck_id, flashcard_id, flashcard_json)
+    return jsonify({'flashcard_id': edited_flashcard_id}), 200
+
+
+@app.route('/delete-flashcard', methods=['POST'])
+@jwt_required()
+def delete_flashcard_endpoint():
+    data = request.json
+    clerk_user_id = get_jwt_identity()
+    deck_id = data.get('deck_id')
+    if not verify_user_has_deck(clerk_user_id, deck_id):
+        return jsonify(
+            {'error': 'User does not have access to this deck.'}), 403
+    flashcard_id = data.get('flashcard_id')
+    deleted_flashcard_id = delete_flashcard(deck_id, flashcard_id)
+    return jsonify({'flashcard_id': deleted_flashcard_id}), 200
+
+
+@app.route('/generate-flashcards', methods=['POST'])
+def generate_flashcards_endpoint():
+    data = request.json
+    n = data.get('n')
+    topic = data.get('topic')
+    reference = data.get('reference')
+    flashcards = generate_flashcards(n, topic, reference)
+    flashcards = [flashcard.model_dump() for flashcard in flashcards]
+    return jsonify({'flashcards': flashcards}), 200
+
+
 # ========= FIREBASE =========
-def add_user(name):
-    def increment_counter(current_value):
-        if current_value is None:
-            return 1
-        else:
-            return current_value + 1
-
-    counter_ref = db.reference('user_counter')
-    new_user_id = counter_ref.transaction(increment_counter)
+def add_user(clerk_user_id, name):
     name = name[:30]
-
-    user_ref = db.reference(f'users/{new_user_id}')
+    user_ref = db.reference(f'users/{clerk_user_id}')
     user_ref.set({
         'name': name,
-        'flashcards': {},
-        'card_counter': 0
+        'decks': [],
     })
-    print(f"New user {name} added with ID {new_user_id}. User initialized with empty flashcard collection and a card counter set to 0.")
-    return new_user_id
+    print(
+        f"New user {name} added with Clerk ID {clerk_user_id}. User initialized with empty flashcard collection.")
+    return clerk_user_id
 
 
 def delete_user(user_id):
@@ -140,61 +251,190 @@ def delete_user(user_id):
     user_data = user_ref.get()
     if user_data:
         user_ref.delete()
-        print(f"User {user_id} and all associated flashcards have been deleted.")
+        print(
+            f"User {user_id} and all associated flashcards have been deleted.")
         return user_id
     else:
         print(f"User {user_id} does not exist.")
 
 
-def add_flashcard(user_id, flashcard_json):
-    flashcard = Flashcard.from_json(flashcard_json)
+def create_deck(deck_name):
+    def increment_counter(current_value):
+        if current_value is None:
+            return 1
+        else:
+            return current_value + 1
 
+    counter_ref = db.reference('deck_counter')
+    new_deck_id = counter_ref.transaction(increment_counter)
+    deck_name = deck_name[:30]
+
+    deck_ref = db.reference(f'decks/{new_deck_id}')
+    deck_ref.set({
+        'name': deck_name,
+        'flashcards': {},
+        'card_counter': 0
+    })
+    print(
+        f"New deck {deck_name} added with ID {new_deck_id}. Deck initialized with empty flashcard collection.")
+    return new_deck_id
+
+
+def delete_deck(deck_id):
+    deck_ref = db.reference(f'decks/{deck_id}')
+    deck_data = deck_ref.get()
+    if deck_data:
+        deck_ref.delete()
+        print(
+            f"Deck {deck_id} and all associated flashcards have been deleted.")
+        return deck_id
+    else:
+        print(f"Deck {deck_id} does not exist.")
+
+
+def add_deck_to_user(user_id, deck_id):
     user_ref = db.reference(f'users/{user_id}')
     user_data = user_ref.get()
     if user_data:
-        card_counter = user_data.get('card_counter', 0)
-        flashcard.id = card_counter
-        flashcards_ref = user_ref.child('flashcards')
-        flashcards_ref.update({
-            card_counter: flashcard.to_dict()
-        })
-        user_ref.update({'card_counter': card_counter + 1})
-        print(f"Added new flashcard with ID {card_counter} to user {user_id}.")
-        return card_counter
+        decks = user_data.get('decks', [])
+        decks.append(deck_id)
+        user_ref.update({'decks': decks})
+        print(f"Deck {deck_id} added to user {user_id}.")
+        return deck_id
     else:
         print(f"User {user_id} does not exist.")
 
 
-def edit_flashcard(user_id, flashcard_id, flashcard_json):
-    flashcard_ref = db.reference(f'users/{user_id}/flashcards/{flashcard_id}')
+def verify_user_has_deck(user_id, deck_id):
+    user_ref = db.reference(f'users/{user_id}')
+    user_data = user_ref.get()
+    if user_data:
+        decks = user_data.get('decks', [])
+        if deck_id in decks:
+            return True
+        else:
+            print(f"User {user_id} does not have deck {deck_id}.")
+            return False
+    else:
+        print(f"User {user_id} does not exist.")
+        return False
+
+
+def remove_deck_from_user(user_id, deck_id):
+    user_ref = db.reference(f'users/{user_id}')
+    user_data = user_ref.get()
+    if user_data:
+        decks = user_data.get('decks', [])
+        if deck_id in decks:
+            decks.remove(deck_id)
+            user_ref.update({'decks': decks})
+            print(f"Deck {deck_id} removed from user {user_id}.")
+            return deck_id
+        else:
+            print(f"Deck {deck_id} is not associated with user {user_id}.")
+    else:
+        print(f"User {user_id} does not exist.")
+
+
+def get_decks(user_id):
+    user_ref = db.reference(f'users/{user_id}')
+    user_data = user_ref.get()
+    if user_data:
+        decks = user_data.get('decks', [])
+        named_decks = {}
+        for deck_id in decks:
+            deck_name = check_deck_exists(deck_id)
+            if not check_deck_exists(deck_id):
+                decks.remove(deck_id)
+            else:
+                named_decks.update(
+                    {"deck_id": deck_id, "deck_name": deck_name})
+        user_ref.update({'decks': decks})
+        print(f"User {user_id} has the following decks: {named_decks}")
+        return named_decks
+    else:
+        print(f"User {user_id} does not exist.")
+
+
+def add_flashcard(deck_id, flashcard_json):
+    flashcard = Flashcard.from_json(flashcard_json)
+
+    deck_ref = db.reference(f'decks/{deck_id}')
+    deck_data = deck_ref.get()
+    if deck_data:
+        card_counter = deck_data.get('card_counter', 0)
+        flashcard.id = card_counter
+        flashcards_ref = deck_ref.child('flashcards')
+        flashcards_ref.update({
+            card_counter: flashcard.to_dict()
+        })
+        deck_ref.update({'card_counter': card_counter + 1})
+        print(f"Added new flashcard with ID {card_counter} to deck {deck_id}.")
+        return card_counter
+    else:
+        print(f"Deck {deck_id} does not exist.")
+
+
+def edit_flashcard(deck_id, flashcard_id, flashcard_json):
+    flashcard_ref = db.reference(f'decks/{deck_id}/flashcards/{flashcard_id}')
     flashcard_data = flashcard_ref.get()
     if flashcard_data:
         updated_flashcard = Flashcard.from_json(flashcard_json)
         updated_flashcard.id = flashcard_id
         flashcard_ref.set(updated_flashcard.to_dict())
-        print(f"Flashcard ID {flashcard_id} for user {user_id} has been updated.")
+        print(
+            f"Flashcard ID {flashcard_id} for deck {deck_id} has been updated.")
         return flashcard_id
     else:
-        print(f"Flashcard ID {flashcard_id} for user {user_id} does not exist or has already been deleted.")
+        print(
+            f"Flashcard ID {flashcard_id} for deck {deck_id} does not exist or has already been deleted.")
 
 
-def delete_flashcard(user_id, flashcard_id):
-    flashcard_ref = db.reference(f'users/{user_id}/flashcards/{flashcard_id}')
+def delete_flashcard(deck_id, flashcard_id):
+    flashcard_ref = db.reference(f'decks/{deck_id}/flashcards/{flashcard_id}')
     flashcard_data = flashcard_ref.get()
     if flashcard_data:
         flashcard_ref.delete()
-        print(f"Flashcard ID {flashcard_id} for user {user_id} has been deleted.")
+        print(
+            f"Flashcard ID {flashcard_id} for deck {deck_id} has been deleted.")
         return flashcard_id
     else:
-        print(f"Flashcard ID {flashcard_id} for user {user_id} does not exist or has already been deleted.")
+        print(
+            f"Flashcard ID {flashcard_id} for deck {deck_id} does not exist or has already been deleted.")
+
+
+def check_deck_exists(deck_id):
+    deck_ref = db.reference(f'decks/{deck_id}')
+    deck_data = deck_ref.get()
+    if deck_data is not None:
+        deck_name = deck_data.get('name')
+    else:
+        deck_name = None
+    return deck_name
+
+
+def get_flashcards(deck_id):
+    deck_ref = db.reference(f'decks/{deck_id}')
+    deck_data = deck_ref.get()
+    if deck_data:
+        flashcards = deck_data.get('flashcards', {})
+        print(f"Deck {deck_id} has the following flashcards: {flashcards}")
+        return flashcards
+    else:
+        print(f"Deck {deck_id} does not exist.")
 
 
 # ========= GEN AI =========
-def generate_flashcards(n, topic=None, reference=None):
+def generate_flashcards(n, topic=None, reference=None, text=None):
     if topic:
-        prompt = f"Generate {n} flashcards on the topic of {topic}. Make sure the title is <=50 chars and the front and back are <=200 chars long. \n"
+        prompt = FLASHCARD_PROMPT_TOPIC.format(n=n, topic=topic)
     elif reference:
-        prompt = f"Generate {n} additional flashcards based on the following reference: \n{reference}\nMake sure the title is <=50 chars and the front and back are <=200 chars long."
+        prompt = FLASHCARD_PROMPT_REFERENCE.format(n=n, reference=reference)
+    elif text:
+        prompt = FLASHCARD_PROMPT_FROM_TEXT.format(n=n, text=text)
+    else:
+        raise ValueError(
+            "You must provide a topic, reference, or text to generate flashcards.")
 
     completion = client.beta.chat.completions.parse(
         model="gpt-4o-mini",
@@ -208,26 +448,41 @@ def generate_flashcards(n, topic=None, reference=None):
     return flashcards.flashcards
 
 
+# ========= TESTS =========
+
 # test generate flashcards
 flashcards = generate_flashcards(2, topic="Python programming")
-flashcards = [Flashcard.from_dict(flashcard.model_dump()) for flashcard in flashcards]
+flashcards = [Flashcard.from_dict(flashcard.model_dump())
+              for flashcard in flashcards]
 for flashcard in flashcards:
     print(flashcard)
 
-# test adding user
-new_user_id = add_user("Alice")
+# test adding users
+new_user_id_1 = add_user(0, "Alice")
+new_user_id_2 = add_user(1, "Bob")
+
+# test adding decks
+new_deck_id_1 = create_deck("Python Programming")
+new_deck_id_2 = create_deck("Data Science")
+
+# test adding deck to users
+add_deck_to_user(new_user_id_1, new_deck_id_1)
+add_deck_to_user(new_user_id_2, new_deck_id_1)
 
 # test adding flashcard
-new_flashcard_id = add_flashcard(new_user_id, flashcards[0].to_json())
+new_flashcard_id = add_flashcard(new_deck_id_1, flashcards[0].to_json())
 
 # test editing flashcard
-edit_flashcard(new_user_id, new_flashcard_id, flashcards[1].to_json())
+edit_flashcard(new_deck_id_1, new_flashcard_id, flashcards[1].to_json())
 
-# test deleting flashcard
-delete_flashcard(new_user_id, new_flashcard_id)
+# # test deleting flashcard
+# delete_flashcard(new_deck_id_1, new_flashcard_id)
 
-# test deleting user
-delete_user(new_user_id)
+# # test removing deck from user
+# remove_deck_from_user(new_user_id_1, new_deck_id_1)
 
+# # test deleting deck
+# delete_deck(new_deck_id_1)
 
-
+# # test deleting user
+# delete_user(new_user_id_1)

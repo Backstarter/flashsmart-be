@@ -1,0 +1,3 @@
+FLASHCARD_PROMPT_TOPIC = "Generate {n} flashcards on the topic of {topic}. Make sure the title is <=50 chars and the front and back are <=200 chars long. \n"
+FLASHCARD_PROMPT_REFERENCE = "Generate {n} additional flashcards based on the following reference: \n{reference}\nMake sure the title is <=50 chars and the front and back are <=200 chars long."
+FLASHCARD_PROMPT_FROM_TEXT = "Generate {n} flashcards to test the knowledge of the following materials: \n{text}\nMake sure the title is <=50 chars and the front and back are <=200 chars long."
