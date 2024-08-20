@@ -14,8 +14,8 @@ from prompt_templates import *
 
 load_dotenv()
 app = Flask(__name__)
-app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY")
-jwt = JWTManager(app)
+# app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY")
+# jwt = JWTManager(app)
 CORS(app)
 
 # clerk
@@ -124,65 +124,95 @@ def hello():
 
 
 @app.route('/add-user', methods=['POST'])
-@jwt_required()
+# @jwt_required()
 def add_user_endpoint():
-    clerk_user_id = get_jwt_identity()
     data = request.json
+    clerk_user_id = data.get('user_id')
     name = data.get('name')
     new_user_id = add_user(clerk_user_id, name)
     return jsonify({'user_id': new_user_id}), 200
 
 
 @app.route('/delete-user', methods=['POST'])
-@jwt_required()
+# @jwt_required()
 def delete_user_endpoint():
-    clerk_user_id = get_jwt_identity()
+    data = request.json
+    clerk_user_id = data.get('user_id')
+    if not verify_user_exists(clerk_user_id):
+        return jsonify({'error': 'Invalid user credentials.'}), 401
     deleted_user_id = delete_user(clerk_user_id)
     return jsonify({'user_id': deleted_user_id}), 200
 
 
 @app.route('/create-deck', methods=['POST'])
-@jwt_required()
+# @jwt_required()
 def create_deck_endpoint():
     data = request.json
+    clerk_user_id = data.get('user_id')
+    if not verify_user_exists(clerk_user_id):
+        return jsonify({'error': 'Invalid user credentials.'}), 401
     deck_name = data.get('deck_name')
-    new_deck_id = create_deck(deck_name)
+    description = data.get('description')
+    new_deck_id = create_deck(deck_name, description)
     return jsonify({'deck_id': new_deck_id}), 200
 
 
-@app.route('/add-deck-to-user', methods=['POST'])
-@jwt_required()
-def add_deck_to_user_endpoint():
-    clerk_user_id = get_jwt_identity()
+@app.route('/modify-deck', methods=['POST'])
+# @jwt_required()
+def modify_deck_endpoint():
     data = request.json
+    clerk_user_id = data.get('user_id')
+    if not verify_user_exists(clerk_user_id):
+        return jsonify({'error': 'Invalid user credentials.'}), 401
+    deck_id = data.get('deck_id')
+    deck_name = data.get('deck_name')
+    description = data.get('description')
+    updated_deck_id = modify_deck(deck_id, deck_name, description)
+    return jsonify({'deck_id': updated_deck_id}), 200
+
+
+@app.route('/add-deck-to-user', methods=['POST'])
+# @jwt_required()
+def add_deck_to_user_endpoint():
+    data = request.json
+    clerk_user_id = data.get('user_id')
+    if not verify_user_exists(clerk_user_id):
+        return jsonify({'error': 'Invalid user credentials.'}), 401
     deck_id = data.get('deck_id')
     added_deck_id = add_deck_to_user(clerk_user_id, deck_id)
     return jsonify({'deck_id': added_deck_id}), 200
 
 
 @app.route('/remove-deck-from-user', methods=['POST'])
-@jwt_required()
+# @jwt_required()
 def remove_deck_from_user_endpoint():
-    clerk_user_id = get_jwt_identity()
     data = request.json
+    clerk_user_id = data.get('user_id')
+    if not verify_user_exists(clerk_user_id):
+        return jsonify({'error': 'Invalid user credentials.'}), 401
     deck_id = data.get('deck_id')
     removed_deck_id = remove_deck_from_user(clerk_user_id, deck_id)
     return jsonify({'deck_id': removed_deck_id}), 200
 
 
 @app.route('/get-decks', methods=['GET'])
-@jwt_required()
+# @jwt_required()
 def get_decks_endpoint():
-    clerk_user_id = get_jwt_identity()
+    data = request.json
+    clerk_user_id = data.get('user_id')
+    if not verify_user_exists(clerk_user_id):
+        return jsonify({'error': 'Invalid user credentials.'}), 401
     decks = get_decks(clerk_user_id)
     return jsonify({'decks': decks}), 200
 
 
 @app.route('/add-flashcard', methods=['POST'])
-@jwt_required()
+# @jwt_required()
 def add_flashcard_endpoint():
     data = request.json
-    clerk_user_id = get_jwt_identity()
+    clerk_user_id = data.get('user_id')
+    if not verify_user_exists(clerk_user_id):
+        return jsonify({'error': 'Invalid user credentials.'}), 401
     deck_id = data.get('deck_id')
     if not verify_user_has_deck(clerk_user_id, deck_id):
         return jsonify(
@@ -193,10 +223,12 @@ def add_flashcard_endpoint():
 
 
 @app.route('/edit-flashcard', methods=['POST'])
-@jwt_required()
+# @jwt_required()
 def edit_flashcard_endpoint():
     data = request.json
-    clerk_user_id = get_jwt_identity()
+    clerk_user_id = data.get('user_id')
+    if not verify_user_exists(clerk_user_id):
+        return jsonify({'error': 'Invalid user credentials.'}), 401
     deck_id = data.get('deck_id')
     if not verify_user_has_deck(clerk_user_id, deck_id):
         return jsonify(
@@ -208,10 +240,13 @@ def edit_flashcard_endpoint():
 
 
 @app.route('/delete-flashcard', methods=['POST'])
-@jwt_required()
+# @jwt_required()
 def delete_flashcard_endpoint():
     data = request.json
-    clerk_user_id = get_jwt_identity()
+    clerk_user_id = data.get('user_id')
+    if not verify_user_exists(clerk_user_id):
+        return jsonify({'error': 'Invalid user credentials.'}), 401
+    # clerk_user_id = get_jwt_identity()
     deck_id = data.get('deck_id')
     if not verify_user_has_deck(clerk_user_id, deck_id):
         return jsonify(
@@ -224,6 +259,9 @@ def delete_flashcard_endpoint():
 @app.route('/generate-flashcards', methods=['POST'])
 def generate_flashcards_endpoint():
     data = request.json
+    clerk_user_id = data.get('user_id')
+    if not verify_user_exists(clerk_user_id):
+        return jsonify({'error': 'Invalid user credentials.'}), 401
     n = data.get('n')
     topic = data.get('topic')
     reference = data.get('reference')
@@ -245,6 +283,16 @@ def add_user(clerk_user_id, name):
     return clerk_user_id
 
 
+def verify_user_exists(user_id):
+    user_ref = db.reference(f'users/{user_id}')
+    user_data = user_ref.get()
+    if user_data:
+        return True
+    else:
+        print(f"User {user_id} does not exist.")
+        return False
+
+
 def delete_user(user_id):
     user_ref = db.reference(f'users/{user_id}')
     user_data = user_ref.get()
@@ -257,7 +305,7 @@ def delete_user(user_id):
         print(f"User {user_id} does not exist.")
 
 
-def create_deck(deck_name):
+def create_deck(deck_name, description):
     def increment_counter(current_value):
         if current_value is None:
             return 1
@@ -271,12 +319,27 @@ def create_deck(deck_name):
     deck_ref = db.reference(f'decks/{new_deck_id}')
     deck_ref.set({
         'name': deck_name,
+        'description': description,
         'flashcards': {},
         'card_counter': 0
     })
     print(
         f"New deck {deck_name} added with ID {new_deck_id}. Deck initialized with empty flashcard collection.")
     return new_deck_id
+
+
+def modify_deck(deck_id, deck_name, description):
+    deck_ref = db.reference(f'decks/{deck_id}')
+    deck_data = deck_ref.get()
+    if deck_data:
+        deck_ref.update({
+            'name': deck_name,
+            'description': description
+        })
+        print(f"Deck {deck_id} has been updated.")
+        return deck_id
+    else:
+        print(f"Deck {deck_id} does not exist.")
 
 
 def delete_deck(deck_id):

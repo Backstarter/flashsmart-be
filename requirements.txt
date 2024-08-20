@@ -1,0 +1,8 @@
+flask
+flask-cors
+firebase-admin
+python-dotenv
+openai
+pydantic
+clerk-backend-api
+flask-jwt-extended
