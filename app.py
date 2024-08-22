@@ -154,6 +154,7 @@ def create_deck_endpoint():
     deck_name = data.get('deck_name')
     description = data.get('description')
     new_deck_id = create_deck(clerk_user_id, deck_name, description)
+    add_deck_to_user(clerk_user_id, new_deck_id)
     return jsonify({'deck_id': new_deck_id}), 200
 
 
