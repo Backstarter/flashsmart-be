@@ -52,7 +52,7 @@ class Flashcard:
         self.update_back(back)
 
     def update_title(self, title):
-        self.title = title[:Flashcard.TITLE_LENGTH_LIMIT]
+        self.title = title[:Flashcard.TITLE_LENGTH_LIMIT] if title else ""
 
     def update_front(self, front):
         self.front = front[:Flashcard.FRONT_IMAGE_TEXT_LIMIT] if self.front_image_url else front[:Flashcard.FRONT_TEXT_LIMIT]
@@ -61,10 +61,10 @@ class Flashcard:
         self.back = back[:Flashcard.BACK_IMAGE_TEXT_LIMIT] if self.back_image_url else back[:Flashcard.BACK_TEXT_LIMIT]
 
     def update_front_image_url(self, front_image_url):
-        self.front_image_url = front_image_url
+        self.front_image_url = front_image_url if front_image_url else ""
 
     def update_back_image_url(self, back_image_url):
-        self.back_image_url = back_image_url
+        self.back_image_url = back_image_url if back_image_url else ""
 
     def to_dict(self):
         return {
@@ -231,6 +231,25 @@ def add_flashcard_endpoint():
     flashcard_json = data.get('flashcard')
     new_flashcard_id = add_flashcard(deck_id, flashcard_json)
     return jsonify({'flashcard_id': new_flashcard_id}), 200
+
+
+@app.route('/add-flashcards', methods=['POST'])
+# @jwt_required()
+def add_flashcards_endpoint():
+    data = request.json
+    clerk_user_id = data.get('user_id')
+    if not verify_user_exists(clerk_user_id):
+        return jsonify({'error': 'Invalid user credentials.'}), 401
+    deck_id = data.get('deck_id')
+    if not verify_user_has_deck(clerk_user_id, deck_id):
+        return jsonify(
+            {'error': 'User does not have access to this deck.'}), 403
+    flashcards_json = data.get('flashcards')
+    new_flashcard_ids = []
+    for flashcard_json in flashcards_json:
+        new_flashcard_id = add_flashcard(deck_id, flashcard_json)
+        new_flashcard_ids.append(new_flashcard_id)
+    return jsonify({'flashcard_ids': new_flashcard_ids}), 200
 
 
 @app.route('/edit-flashcard', methods=['POST'])
@@ -425,7 +444,8 @@ def get_decks(user_id):
         decks = user_data.get('decks', [])
         named_decks = {}
         for deck_id in decks:
-            deck_owner, deck_name, deck_description = check_deck_exists(deck_id)
+            deck_owner, deck_name, deck_description = check_deck_exists(
+                deck_id)
             if not deck_name and not deck_description:
                 decks.remove(deck_id)
             else:
