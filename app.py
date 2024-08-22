@@ -8,8 +8,8 @@ import json
 from dotenv import load_dotenv
 import openai
 from pydantic import BaseModel
-from clerk_backend_api import Clerk
-from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
+# from clerk_backend_api import Clerk
+# from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
 from prompt_templates import *
 
 load_dotenv()
@@ -27,7 +27,7 @@ openai_api_key = os.getenv("OPENAI_API_KEY")
 client = openai.OpenAI()
 
 # firebase
-cred_path = os.getenv("FIREBASE_CRED_PATH")
+cred_path = os.path.join('config', os.getenv("FIREBASE_CRED_FN"))
 url = os.getenv("FIREBASE_URL")
 cred = credentials.Certificate(cred_path)
 firebase_admin.initialize_app(cred, {
@@ -153,7 +153,7 @@ def create_deck_endpoint():
         return jsonify({'error': 'Invalid user credentials.'}), 401
     deck_name = data.get('deck_name')
     description = data.get('description')
-    new_deck_id = create_deck(deck_name, description)
+    new_deck_id = create_deck(clerk_user_id, deck_name, description)
     return jsonify({'deck_id': new_deck_id}), 200
 
 
@@ -164,6 +164,9 @@ def modify_deck_endpoint():
     clerk_user_id = data.get('user_id')
     if not verify_user_exists(clerk_user_id):
         return jsonify({'error': 'Invalid user credentials.'}), 401
+    if not verify_user_has_deck(clerk_user_id, data.get('deck_id')):
+        return jsonify(
+            {'error': 'User does not have access to this deck.'}), 403
     deck_id = data.get('deck_id')
     deck_name = data.get('deck_name')
     description = data.get('description')
@@ -198,12 +201,20 @@ def remove_deck_from_user_endpoint():
 @app.route('/get-decks', methods=['GET'])
 # @jwt_required()
 def get_decks_endpoint():
-    data = request.json
-    clerk_user_id = data.get('user_id')
+    clerk_user_id = request.args.get('user_id')
     if not verify_user_exists(clerk_user_id):
         return jsonify({'error': 'Invalid user credentials.'}), 401
     decks = get_decks(clerk_user_id)
     return jsonify({'decks': decks}), 200
+
+
+@app.route('/get-flashcards', methods=['GET'])
+def get_flashcards_endpoint():
+    deck_id = request.args.get('deck_id')
+    flashcards = get_flashcards(deck_id)
+    if not flashcards:
+        return jsonify({'error': 'Deck does not exist.'}), 404
+    return jsonify({'flashcards': flashcards}), 200
 
 
 @app.route('/add-flashcard', methods=['POST'])
@@ -303,9 +314,10 @@ def delete_user(user_id):
         return user_id
     else:
         print(f"User {user_id} does not exist.")
+        return None
 
 
-def create_deck(deck_name, description):
+def create_deck(user_id, deck_name, description=""):
     def increment_counter(current_value):
         if current_value is None:
             return 1
@@ -318,6 +330,7 @@ def create_deck(deck_name, description):
 
     deck_ref = db.reference(f'decks/{new_deck_id}')
     deck_ref.set({
+        'owner': user_id,
         'name': deck_name,
         'description': description,
         'flashcards': {},
@@ -340,6 +353,7 @@ def modify_deck(deck_id, deck_name, description):
         return deck_id
     else:
         print(f"Deck {deck_id} does not exist.")
+        return None
 
 
 def delete_deck(deck_id):
@@ -352,6 +366,7 @@ def delete_deck(deck_id):
         return deck_id
     else:
         print(f"Deck {deck_id} does not exist.")
+        return None
 
 
 def add_deck_to_user(user_id, deck_id):
@@ -365,6 +380,7 @@ def add_deck_to_user(user_id, deck_id):
         return deck_id
     else:
         print(f"User {user_id} does not exist.")
+        return None
 
 
 def verify_user_has_deck(user_id, deck_id):
@@ -373,7 +389,10 @@ def verify_user_has_deck(user_id, deck_id):
     if user_data:
         decks = user_data.get('decks', [])
         if deck_id in decks:
-            return True
+            if check_deck_exists(deck_id):
+                deck = db.reference(f'decks/{deck_id}').get()
+                if deck['owner'] == user_id:
+                    return True
         else:
             print(f"User {user_id} does not have deck {deck_id}.")
             return False
@@ -396,6 +415,7 @@ def remove_deck_from_user(user_id, deck_id):
             print(f"Deck {deck_id} is not associated with user {user_id}.")
     else:
         print(f"User {user_id} does not exist.")
+        return None
 
 
 def get_decks(user_id):
@@ -405,17 +425,18 @@ def get_decks(user_id):
         decks = user_data.get('decks', [])
         named_decks = {}
         for deck_id in decks:
-            deck_name = check_deck_exists(deck_id)
-            if not check_deck_exists(deck_id):
+            deck_owner, deck_name, deck_description = check_deck_exists(deck_id)
+            if not deck_name and not deck_description:
                 decks.remove(deck_id)
             else:
                 named_decks.update(
-                    {"deck_id": deck_id, "deck_name": deck_name})
+                    {"deck_id": deck_id, "deck_owner": deck_owner, "deck_name": deck_name, "deck_description": deck_description})
         user_ref.update({'decks': decks})
         print(f"User {user_id} has the following decks: {named_decks}")
         return named_decks
     else:
         print(f"User {user_id} does not exist.")
+        return None
 
 
 def add_flashcard(deck_id, flashcard_json):
@@ -435,6 +456,7 @@ def add_flashcard(deck_id, flashcard_json):
         return card_counter
     else:
         print(f"Deck {deck_id} does not exist.")
+        return None
 
 
 def edit_flashcard(deck_id, flashcard_id, flashcard_json):
@@ -450,6 +472,7 @@ def edit_flashcard(deck_id, flashcard_id, flashcard_json):
     else:
         print(
             f"Flashcard ID {flashcard_id} for deck {deck_id} does not exist or has already been deleted.")
+        return None
 
 
 def delete_flashcard(deck_id, flashcard_id):
@@ -463,16 +486,21 @@ def delete_flashcard(deck_id, flashcard_id):
     else:
         print(
             f"Flashcard ID {flashcard_id} for deck {deck_id} does not exist or has already been deleted.")
+        return None
 
 
 def check_deck_exists(deck_id):
     deck_ref = db.reference(f'decks/{deck_id}')
     deck_data = deck_ref.get()
     if deck_data is not None:
+        deck_owner = deck_data.get('owner')
         deck_name = deck_data.get('name')
+        deck_description = deck_data.get('description')
     else:
+        deck_owner = None
         deck_name = None
-    return deck_name
+        deck_description = None
+    return deck_owner, deck_name, deck_description
 
 
 def get_flashcards(deck_id):
@@ -484,6 +512,7 @@ def get_flashcards(deck_id):
         return flashcards
     else:
         print(f"Deck {deck_id} does not exist.")
+        return None
 
 
 # ========= GEN AI =========
@@ -510,41 +539,57 @@ def generate_flashcards(n, topic=None, reference=None, text=None):
     return flashcards.flashcards
 
 
+# ========= UTILS =========
+def clear_all_decks():
+    db.reference('decks').delete()
+    db.reference('deck_counter').set(0)
+    print("All decks have been deleted.")
+
+
+def clear_all_users():
+    db.reference('users').delete()
+    print("All users have been deleted.")
+
+
 # ========= TESTS =========
+def test_firebase_and_gen():
+    # test generate flashcards
+    flashcards = generate_flashcards(2, topic="Python programming")
+    flashcards = [Flashcard.from_dict(flashcard.model_dump())
+                  for flashcard in flashcards]
+    for flashcard in flashcards:
+        print(flashcard)
 
-# test generate flashcards
-flashcards = generate_flashcards(2, topic="Python programming")
-flashcards = [Flashcard.from_dict(flashcard.model_dump())
-              for flashcard in flashcards]
-for flashcard in flashcards:
-    print(flashcard)
+    # test adding users
+    new_user_id_1 = add_user(0, "Alice")
+    new_user_id_2 = add_user(1, "Bob")
 
-# test adding users
-new_user_id_1 = add_user(0, "Alice")
-new_user_id_2 = add_user(1, "Bob")
+    # test adding decks
+    new_deck_id_1 = create_deck(0, "Python Programming")
+    new_deck_id_2 = create_deck(1, "Data Science")
 
-# test adding decks
-new_deck_id_1 = create_deck("Python Programming")
-new_deck_id_2 = create_deck("Data Science")
+    # test adding deck to users
+    add_deck_to_user(new_user_id_1, new_deck_id_1)
+    add_deck_to_user(new_user_id_2, new_deck_id_1)
 
-# test adding deck to users
-add_deck_to_user(new_user_id_1, new_deck_id_1)
-add_deck_to_user(new_user_id_2, new_deck_id_1)
+    # test adding flashcard
+    new_flashcard_id = add_flashcard(new_deck_id_1, flashcards[0].to_json())
 
-# test adding flashcard
-new_flashcard_id = add_flashcard(new_deck_id_1, flashcards[0].to_json())
+    # test editing flashcard
+    edit_flashcard(new_deck_id_1, new_flashcard_id, flashcards[1].to_json())
 
-# test editing flashcard
-edit_flashcard(new_deck_id_1, new_flashcard_id, flashcards[1].to_json())
+    # # test deleting flashcard
+    # delete_flashcard(new_deck_id_1, new_flashcard_id)
 
-# # test deleting flashcard
-# delete_flashcard(new_deck_id_1, new_flashcard_id)
+    # # test removing deck from user
+    # remove_deck_from_user(new_user_id_1, new_deck_id_1)
 
-# # test removing deck from user
-# remove_deck_from_user(new_user_id_1, new_deck_id_1)
+    # # test deleting deck
+    # delete_deck(new_deck_id_1)
 
-# # test deleting deck
-# delete_deck(new_deck_id_1)
+    # # test deleting user
+    # delete_user(new_user_id_1)
 
-# # test deleting user
-# delete_user(new_user_id_1)
+
+if __name__ == '__main__':
+    app.run(debug=True)

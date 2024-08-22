@@ -6,3 +6,4 @@ openai
 pydantic
 clerk-backend-api
 flask-jwt-extended
+gunicorn
