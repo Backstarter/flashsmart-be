@@ -346,7 +346,7 @@ def create_deck(user_id, deck_name, description=""):
 
     counter_ref = db.reference('deck_counter')
     new_deck_id = counter_ref.transaction(increment_counter)
-    deck_name = deck_name[:30]
+    deck_name = deck_name[:60]
 
     deck_ref = db.reference(f'decks/{new_deck_id}')
     deck_ref.set({
@@ -450,8 +450,10 @@ def get_decks(user_id):
             if not deck_name and not deck_description:
                 decks.remove(deck_id)
             else:
-                named_decks.update(
-                    {"deck_id": deck_id, "deck_owner": deck_owner, "deck_name": deck_name, "deck_description": deck_description})
+                named_decks[deck_id] = {
+                    "deck_owner": deck_owner,
+                    "deck_name": deck_name,
+                    "deck_description": deck_description}
         user_ref.update({'decks': decks})
         print(f"User {user_id} has the following decks: {named_decks}")
         return named_decks
@@ -460,8 +462,8 @@ def get_decks(user_id):
         return None
 
 
-def add_flashcard(deck_id, flashcard_json):
-    flashcard = Flashcard.from_json(flashcard_json)
+def add_flashcard(deck_id, flashcard_dict):
+    flashcard = Flashcard.from_dict(flashcard_dict)
 
     deck_ref = db.reference(f'decks/{deck_id}')
     deck_data = deck_ref.get()
@@ -530,7 +532,7 @@ def get_flashcards(deck_id):
     if deck_data:
         flashcards = deck_data.get('flashcards', {})
         print(f"Deck {deck_id} has the following flashcards: {flashcards}")
-        return flashcards
+        return deck_data
     else:
         print(f"Deck {deck_id} does not exist.")
         return None
@@ -587,6 +589,10 @@ def test_firebase_and_gen():
 
     # test adding decks
     new_deck_id_1 = create_deck(0, "Python Programming")
+    # test get deck
+    deck_ref = db.reference(f'decks/{new_deck_id_1}')
+    deck_data = deck_ref.get()
+    print(deck_data)
     new_deck_id_2 = create_deck(1, "Data Science")
 
     # test adding deck to users
